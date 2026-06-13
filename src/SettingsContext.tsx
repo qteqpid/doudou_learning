@@ -20,6 +20,7 @@ export interface Settings {
   showOnlineCount: boolean;
   showStudyTimer: boolean;
   tvAnimationEnabled: boolean;
+  concealmentTemplate: 'study' | 'chess' | 'ppt' | 'word' | 'drawing';
 }
 
 const defaultSettings: Settings = {
@@ -42,6 +43,7 @@ const defaultSettings: Settings = {
   showOnlineCount: true,
   showStudyTimer: true,
   tvAnimationEnabled: true,
+  concealmentTemplate: 'study',
 };
 
 interface SettingsContextType {

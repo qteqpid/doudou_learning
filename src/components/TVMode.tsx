@@ -353,7 +353,7 @@ export default function TVMode({ onExit, mountCount, triggerPos }: TVModeProps) 
                   {channel === 7 && (
                     <div className="w-full h-full relative z-10 bg-white pointer-events-auto">
                         <iframe 
-                          src="https://www.bilibili.com"
+                          src="/api/proxy/bilibili"
                           className="absolute border-0 bg-white"
                           width="100%"
                           height="100%"

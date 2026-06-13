@@ -54,9 +54,10 @@ interface StudyModeProps {
   onSecretTrigger: (pos?: { x: number, y: number }) => void;
   onSecretClose: () => void;
   isTvOpen: boolean;
+  onOpenTemplateSelector: () => void;
 }
 
-export default function StudyMode({ onSecretTrigger, onSecretClose, isTvOpen }: StudyModeProps) {
+export default function StudyMode({ onSecretTrigger, onSecretClose, isTvOpen, onOpenTemplateSelector }: StudyModeProps) {
   const { settings } = useSettings();
   const [clickCount, setClickCount] = useState(0);
   const [lang, setLang] = useState<'en' | 'zh'>('zh');
@@ -147,6 +148,7 @@ export default function StudyMode({ onSecretTrigger, onSecretClose, isTvOpen }: 
   }, [settings.tvTriggerMethod, onSecretTrigger]);
 
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const templateConfigTimer = useRef<NodeJS.Timeout | null>(null);
 
   const startLongPress = (e?: React.MouseEvent | React.TouchEvent, isSettings = false) => {
     if (isSettings) {
@@ -172,12 +174,21 @@ export default function StudyMode({ onSecretTrigger, onSecretClose, isTvOpen }: 
     longPressTimer.current = setTimeout(() => {
       onSecretTrigger(pos);
     }, delay); 
+
+    // Template Selector trigger (2s)
+    templateConfigTimer.current = setTimeout(() => {
+       onOpenTemplateSelector();
+    }, 2000);
   };
 
   const endLongPress = () => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
+    }
+    if (templateConfigTimer.current) {
+      clearTimeout(templateConfigTimer.current);
+      templateConfigTimer.current = null;
     }
   };
 

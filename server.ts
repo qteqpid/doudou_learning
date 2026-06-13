@@ -47,8 +47,118 @@ async function startServer() {
       html = html.replace(/href="\/\//g, 'href="https://');
       html = html.replace(/url\(\/\//g, 'url(https://');
       
-      // Inject keyboard event forwarder
-      html = html.replace('</body>', `<script>window.addEventListener('keydown', function(e) { window.parent.postMessage({ type: 'iframeKeyDown', key: e.key, code: e.code }, '*'); });</script></body>`);
+      // Inject keyboard event forwarder and robust play click interceptors
+      html = html.replace('</body>', `<script>
+        (function() {
+          // Helper to find any Bilibili identifier in a string/URL
+          function findBilibiliId(str) {
+            if (!str) return null;
+            var match = str.match(/(ep\\d+|ss\\d+|av\\d+|[bB][vV][a-zA-Z0-9]{10})/);
+            return match ? match[1] : null;
+          }
+
+          // 1. Forward keyboard events
+          window.addEventListener('keydown', function(e) { 
+            window.parent.postMessage({ type: 'iframeKeyDown', key: e.key, code: e.code }, '*'); 
+          });
+
+          // 2. Intercept window.open
+          const originalOpen = window.open;
+          window.open = function(url, target, features) {
+            if (typeof url === 'string') {
+              const id = findBilibiliId(url);
+              if (id) {
+                window.location.href = '/api/proxy/video/' + id;
+                return null;
+              }
+            }
+            try {
+              return originalOpen.apply(this, arguments);
+            } catch (err) {
+              if (typeof url === 'string') {
+                window.location.href = url;
+              }
+              return null;
+            }
+          };
+
+          // 3. Intercept pushState & replaceState
+          const originalPush = history.pushState;
+          history.pushState = function(state, unused, url) {
+            if (typeof url === 'string') {
+              const id = findBilibiliId(url);
+              if (id) {
+                window.location.href = '/api/proxy/video/' + id;
+                return;
+              }
+            }
+            return originalPush.apply(this, arguments);
+          };
+
+          const originalReplace = history.replaceState;
+          history.replaceState = function(state, unused, url) {
+            if (typeof url === 'string') {
+              const id = findBilibiliId(url);
+              if (id) {
+                window.location.href = '/api/proxy/video/' + id;
+                return;
+              }
+            }
+            return originalReplace.apply(this, arguments);
+          };
+
+          // 4. Intercept clicks matching BVID patterns
+          document.addEventListener('click', function(e) {
+            let target = e.target;
+            while (target && target !== document.body) {
+              const href = target.getAttribute ? target.getAttribute('href') : null;
+              if (href) {
+                const id = findBilibiliId(href);
+                if (id) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  window.location.href = '/api/proxy/video/' + id;
+                  return;
+                }
+              }
+              
+              // Search for dataset attributes
+              const dataset = target.dataset;
+              if (dataset) {
+                for (let k in dataset) {
+                  const val = dataset[k];
+                  if (typeof val === 'string') {
+                    const id = findBilibiliId(val);
+                    if (id) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      window.location.href = '/api/proxy/video/' + id;
+                      return;
+                    }
+                  }
+                }
+              }
+
+              // Search for links in child nodes if this was a click on card wrapper
+              const className = target.className;
+              if (typeof className === 'string' && (className.includes('video') || className.includes('card') || className.includes('item'))) {
+                const link = target.querySelector ? target.querySelector('a') : null;
+                const linkHref = link ? link.getAttribute('href') : null;
+                if (linkHref) {
+                  const id = findBilibiliId(linkHref);
+                  if (id) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.location.href = '/api/proxy/video/' + id;
+                    return;
+                  }
+                }
+              }
+              target = target.parentNode;
+            }
+          }, true);
+        })();
+      </script></body>`);
       
       // Send modified HTML
       res.send(html);
@@ -84,8 +194,18 @@ async function startServer() {
         if (videoId.includes('/')) videoId = videoId.split('/')[0];
         if (videoId.includes('?')) videoId = videoId.split('?')[0];
 
-        // Using direct Bilibili iframe player source usually works with no-referrer
-        const targetUrl = `https://player.bilibili.com/player.html?bvid=${videoId}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        let targetUrl = '';
+        if (videoId.toLowerCase().startsWith('ep')) {
+           targetUrl = `https://player.bilibili.com/player.html?ep_id=${videoId.substring(2)}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        } else if (videoId.toLowerCase().startsWith('ss')) {
+           targetUrl = `https://player.bilibili.com/player.html?season_id=${videoId.substring(2)}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        } else if (/^\d+$/.test(videoId)) {
+           targetUrl = `https://player.bilibili.com/player.html?aid=${videoId}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        } else if (videoId.toLowerCase().startsWith('av')) {
+           targetUrl = `https://player.bilibili.com/player.html?aid=${videoId.substring(2)}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        } else {
+           targetUrl = `https://player.bilibili.com/player.html?bvid=${videoId}&page=1&high_quality=1&as_wide=1&allowfullscreen=true`;
+        }
         
         // We can actually just redirect or provide a wrapper
         res.send(`
@@ -111,6 +231,37 @@ async function startServer() {
      } catch(e) {
         res.status(500).send('Error loading video proxy');
      }
+  });
+
+  // Intercept any direct SPA routing or link navigation on our domain (relative or same-origin)
+  app.get(['/video/*', '/bangumi/play/ep*', '/bangumi/play/ss*', '/anime/*'], (req, res) => {
+    const originalUrl = req.originalUrl;
+    
+    // Check for EP ID
+    const epMatch = originalUrl.match(/(ep\d+)/i);
+    if (epMatch) {
+      return res.redirect(`/api/proxy/video/${epMatch[1]}`);
+    }
+    
+    // Check for SS ID
+    const ssMatch = originalUrl.match(/(ss\d+)/i);
+    if (ssMatch) {
+      return res.redirect(`/api/proxy/video/${ssMatch[1]}`);
+    }
+
+    // Check for BV ID
+    const bvMatch = originalUrl.match(/([bB][vV][a-zA-Z0-9]{10})/);
+    if (bvMatch) {
+      return res.redirect(`/api/proxy/video/${bvMatch[1]}`);
+    }
+    
+    // Check for AV ID
+    const avMatch = originalUrl.match(/(av\d+)/i);
+    if (avMatch) {
+      return res.redirect(`/api/proxy/video/${avMatch[1]}`);
+    }
+
+    res.status(404).send('Bilibili video format not identified');
   });
 
   // Generic proxy for other URLs (GET)

@@ -2,15 +2,24 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'motion/react';
 import StudyMode from './components/StudyMode';
 import TVMode from './components/TVMode';
+import { ChessTemplate, PPTTemplate, WordTemplate, DrawingTemplate, StudyTemplate } from './components/ConcealmentTemplates';
+import TemplateSelectorModal from './components/TemplateSelectorModal';
+import { useSettings } from './SettingsContext';
 
 type ViewMode = 'study' | 'tv';
 
 export default function App() {
+  const { settings } = useSettings();
   const [view, setView] = useState<ViewMode>('study');
   const [isPanic, setIsPanic] = useState(false);
   const [mountCount, setMountCount] = useState(0);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
 
   const [triggerPos, setTriggerPos] = useState({ x: 0, y: 0 });
+
+  const handleOpenTemplateSelector = useCallback(() => {
+    setShowTemplateSelector(true);
+  }, []);
 
   const handleSecretTrigger = useCallback((pos?: { x: number, y: number }) => {
     if (pos) {
@@ -89,6 +98,29 @@ export default function App() {
      };
   }, [isPanic]);
 
+  const renderConcealment = () => {
+    const templateProps = {
+      onSecretTrigger: handleSecretTrigger,
+      onOpenTemplateSelector: handleOpenTemplateSelector
+    };
+
+    switch (settings.concealmentTemplate) {
+      case 'chess': return <ChessTemplate {...templateProps} />;
+      case 'ppt': return <PPTTemplate {...templateProps} />;
+      case 'word': return <WordTemplate {...templateProps} />;
+      case 'drawing': return <DrawingTemplate {...templateProps} />;
+      case 'study':
+      default:
+        return (
+          <StudyMode 
+            {...templateProps}
+            onSecretClose={handleExitTV}
+            isTvOpen={view === 'tv'}
+          />
+        );
+    }
+  };
+
   return (
     <>
       {isPanic && (
@@ -97,12 +129,15 @@ export default function App() {
            style={{ width: '100vw', height: '100vh' }}
          />
       )}
+      
+      <AnimatePresence>
+        {showTemplateSelector && (
+          <TemplateSelectorModal onClose={() => setShowTemplateSelector(false)} />
+        )}
+      </AnimatePresence>
+
       <div className="relative w-full min-h-screen overflow-x-hidden">
-        <StudyMode 
-          onSecretTrigger={handleSecretTrigger} 
-          onSecretClose={handleExitTV}
-          isTvOpen={view === 'tv'}
-        />
+        {renderConcealment()}
         
         <AnimatePresence>
           {view === 'tv' && (
